@@ -32,6 +32,25 @@ def resolve(value, lookups):
     return by_name.get(v) or by_mpn.get(v) or by_ipn.get(v)
 
 
+def nearest(value, lookups, cutoff=0.6):
+    """Fuzzy-suggest the closest existing part name / MPN for an unmatched feeder value.
+
+    Returns (suggestion, kind, ipn) or None. Uses difflib (stdlib) — helps spot typos
+    like 'C-100nF-10%-50V-0402-X5R' -> 'C-100nF-10%-50V-0402-X7R'.
+    """
+    import difflib
+    v = (value or "").strip()
+    best, best_ratio = None, 0.0
+    for pool, kind in ((lookups[0], "name"), (lookups[1], "mpn")):
+        for cand in difflib.get_close_matches(v, list(pool.keys()), n=1, cutoff=cutoff):
+            ratio = difflib.SequenceMatcher(None, v, cand).ratio()
+            if ratio > best_ratio:
+                part = pool[cand]
+                best = (cand, kind, getattr(part, "IPN", "") or "")
+                best_ratio = ratio
+    return best
+
+
 def reconcile_stock(part, quantity, location, user=None):
     """Set the part's stock AT `location` to `quantity` (create/adjust a single StockItem).
 

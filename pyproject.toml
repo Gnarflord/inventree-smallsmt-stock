@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inventree-smallsmt-stock"
-version = "0.1.2"
+version = "0.1.4"
 description = "InvenTree plugin: import pick-and-place (SMT) feeder stock from the machine's .fig file."
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }

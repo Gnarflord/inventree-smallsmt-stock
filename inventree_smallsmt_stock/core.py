@@ -15,7 +15,7 @@ from django.utils.translation import gettext_lazy as _
 
 from . import SMALLSMT_STOCK_VERSION
 from . import smt_parser
-from .resolve import build_lookups, resolve, reconcile_stock
+from .resolve import build_lookups, resolve, reconcile_stock, nearest
 
 from plugin import InvenTreePlugin
 from plugin.mixins import SettingsMixin, ScheduleMixin, UrlsMixin
@@ -52,8 +52,8 @@ class SmallSMTStockPlugin(SettingsMixin, ScheduleMixin, UrlsMixin, InvenTreePlug
         },
         "UNMATCHED_REPORT_PATH": {
             "name": _("Unmatched report path"),
-            "description": _("Path on the SMB share to write the unmatched-feeder CSV report (typo candidates)"),
-            "default": "smt_unmatched.csv",
+            "description": _("Path on the SMB share for the human-readable unmatched-feeder report (typo candidates)"),
+            "default": "smt_unmatched.txt",
         },
         # --- SMB source ---
         "SMB_HOST": {"name": _("SMB host"), "description": _("SMB/CIFS server host or IP"), "default": ""},
@@ -114,26 +114,38 @@ class SmallSMTStockPlugin(SettingsMixin, ScheduleMixin, UrlsMixin, InvenTreePlug
                     continue
                 stats["matched"] += 1
                 stats[reconcile_stock(part, count, location)] += 1
-        self._report_unmatched(stats["unmatched"])
+        self._report_unmatched(stats["unmatched"], lookups)
         return stats
 
-    def _report_unmatched(self, unmatched):
-        """Log unmatched feeder values (typo candidates) and write a findable CSV to the SMB share."""
-        if unmatched:
+    def _report_unmatched(self, unmatched, lookups):
+        """Log unmatched feeder values with a fuzzy 'nearest match' typo hint, and write a
+        human-readable report to the SMB share. Values may contain commas/quotes/unicode,
+        so this is plain text (not CSV) — no escaping surprises."""
+        entries = []
+        for u in unmatched:
+            sug = nearest(u["value"], lookups)
+            entries.append((u["value"], u["count"], sug[0] if sug else "", sug[2] if sug else ""))
+        if entries:
             logger.warning("[smallsmt-stock] %d unmatched feeder value(s) — check for typos: %s",
-                           len(unmatched), ", ".join(u["value"] for u in unmatched))
+                           len(entries), "; ".join(
+                               f"{v!r}" + (f" ~ {nm!r}" if nm else "") for v, c, nm, ipn in entries))
         path_ = self.get_setting("UNMATCHED_REPORT_PATH")
         host = self.get_setting("SMB_HOST")
         if not (path_ and host):
             return
-        import csv, io
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["part_value", "count"])
-        for u in unmatched:
-            w.writerow([u["value"], u["count"]])
+        lines = [
+            f"Unmatched SmallSMT feeders: {len(entries)}",
+            "These feeder values matched no InvenTree part (by name / MPN / IPN) and were skipped.",
+            "'nearest' is the closest existing part — usually reveals a typo entered on the machine.",
+            "",
+        ]
+        for v, c, nm, ipn in entries:
+            lines.append(f"  - {v}    (count {c})")
+            lines.append(f"        nearest:  {nm}   [{ipn}]" if nm else "        (no close match found)")
+            lines.append("")
+        report = "\n".join(lines)
         from .smb import write_bytes
-        write_bytes(host, self.get_setting("SMB_SHARE"), path_, buf.getvalue().encode("utf-8"),
+        write_bytes(host, self.get_setting("SMB_SHARE"), path_, report.encode("utf-8"),
                     self.get_setting("SMB_USER"), self.get_setting("SMB_PASSWORD"), self.get_setting("SMB_DOMAIN"))
 
     def import_smt_stock(self):

@@ -11,8 +11,9 @@ On a schedule (and on-demand at `/plugin/smallsmt-stock/run`):
    `C-100nF-10%-50V-0603-X7R`), then **ManufacturerPart MPN** (e.g. `CSD17578Q5AT`), then **IPN**.
 4. Reconciles that part's stock at a dedicated **`SMT Feeders`** location to the feeder count
    (creates/updates a single StockItem; stock at other locations is untouched).
-5. Reports unmatched feeder values (placeholder entries like `R-0R-x%-0402-xmW`, or parts not in
-   the library) so they can be fixed manually.
+5. Reports unmatched feeder values to a **human-readable** `smt_unmatched.txt` on the share
+   (and the InvenTree log), each with a fuzzy **nearest-match** hint + IPN — so typos entered on
+   the machine (e.g. `C-…-0402-X5R` vs `X7R`, or a missing comma in an MPN) are obvious to fix.
 
 Validated against a real `config_feed.fig`: 32 of 44 counted feeders resolve automatically.
 
