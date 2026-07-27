@@ -5,6 +5,7 @@ part_value to an InvenTree part (by name / MPN / IPN), and reconciles that part'
 dedicated 'SMT Feeders' location to the feeder's count. Unmatched feeder values are reported.
 Runs on a schedule; also triggerable at /plugin/smallsmt-stock/run for testing.
 """
+import logging
 import os
 import tempfile
 
@@ -18,6 +19,8 @@ from .resolve import build_lookups, resolve, reconcile_stock
 
 from plugin import InvenTreePlugin
 from plugin.mixins import SettingsMixin, ScheduleMixin, UrlsMixin
+
+logger = logging.getLogger("inventree")
 
 
 class SmallSMTStockPlugin(SettingsMixin, ScheduleMixin, UrlsMixin, InvenTreePlugin):
@@ -47,6 +50,11 @@ class SmallSMTStockPlugin(SettingsMixin, ScheduleMixin, UrlsMixin, InvenTreePlug
             "description": _("Path on the SMB share to config_feed.fig"),
             "default": "config_feed.fig",
         },
+        "UNMATCHED_REPORT_PATH": {
+            "name": _("Unmatched report path"),
+            "description": _("Path on the SMB share to write the unmatched-feeder CSV report (typo candidates)"),
+            "default": "smt_unmatched.csv",
+        },
         # --- SMB source ---
         "SMB_HOST": {"name": _("SMB host"), "description": _("SMB/CIFS server host or IP"), "default": ""},
         "SMB_SHARE": {"name": _("SMB share"), "description": _("Share name"), "default": ""},
@@ -61,9 +69,17 @@ class SmallSMTStockPlugin(SettingsMixin, ScheduleMixin, UrlsMixin, InvenTreePlug
 
     # -------------------------------------------------------------------------------
     def _location(self):
+        """Resolve STOCK_LOCATION as a '/'-separated path, creating nested sub-locations.
+
+        e.g. 'Büro Stuttgart/SMT Import Test' -> sub-location 'SMT Import Test' under the
+        top-level 'Büro Stuttgart' (each segment created only if missing).
+        """
         from stock.models import StockLocation
-        name = self.get_setting("STOCK_LOCATION") or "SMT Feeders"
-        loc, _created = StockLocation.objects.get_or_create(name=name)
+        pathstr = self.get_setting("STOCK_LOCATION") or "SMT Feeders"
+        parent, loc = None, None
+        for name in [s.strip() for s in pathstr.split("/") if s.strip()]:
+            loc, _created = StockLocation.objects.get_or_create(name=name, parent=parent)
+            parent = loc
         return loc
 
     def _read_fig(self):
@@ -98,7 +114,27 @@ class SmallSMTStockPlugin(SettingsMixin, ScheduleMixin, UrlsMixin, InvenTreePlug
                     continue
                 stats["matched"] += 1
                 stats[reconcile_stock(part, count, location)] += 1
+        self._report_unmatched(stats["unmatched"])
         return stats
+
+    def _report_unmatched(self, unmatched):
+        """Log unmatched feeder values (typo candidates) and write a findable CSV to the SMB share."""
+        if unmatched:
+            logger.warning("[smallsmt-stock] %d unmatched feeder value(s) — check for typos: %s",
+                           len(unmatched), ", ".join(u["value"] for u in unmatched))
+        path_ = self.get_setting("UNMATCHED_REPORT_PATH")
+        host = self.get_setting("SMB_HOST")
+        if not (path_ and host):
+            return
+        import csv, io
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["part_value", "count"])
+        for u in unmatched:
+            w.writerow([u["value"], u["count"]])
+        from .smb import write_bytes
+        write_bytes(host, self.get_setting("SMB_SHARE"), path_, buf.getvalue().encode("utf-8"),
+                    self.get_setting("SMB_USER"), self.get_setting("SMB_PASSWORD"), self.get_setting("SMB_DOMAIN"))
 
     def import_smt_stock(self):
         if not self.get_setting("IMPORT_ENABLED"):
