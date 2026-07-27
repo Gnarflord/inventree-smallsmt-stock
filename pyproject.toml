@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inventree-smallsmt-stock"
+version = "0.1.0"
+description = "InvenTree plugin: import pick-and-place (SMT) feeder stock from the machine's .fig file."
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Jan Wolf", email = "jan.wolf@frickly.systems" }]
+requires-python = ">=3.9"
+keywords = ["inventree", "smt", "pick-and-place", "stock"]
+dependencies = [
+    "smbprotocol>=1.10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/frickly-systems/inventree-smallsmt-stock"
+
+[project.entry-points."inventree_plugins"]
+SmallSMTStock = "inventree_smallsmt_stock.core:SmallSMTStockPlugin"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["inventree_smallsmt_stock*"]
